@@ -1,7 +1,15 @@
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use std::fs::File;
-use std::io::{self, BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, Read};
+
+#[derive(ValueEnum, PartialEq, Clone, Default, Debug)]
+#[clap(rename_all = "lowercase")]
+enum TotalWhen {
+    #[default]
+    Always,
+    Never,
+}
 
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
@@ -22,6 +30,9 @@ struct Args {
     /// Show character count
     #[arg(short('m'), long, conflicts_with("bytes"))]
     chars: bool,
+    // When to print a line with total counts; WHEN can be: auto, always, only, never
+    #[arg(long, default_value_t, value_enum)]
+    total: TotalWhen,
 }
 
 #[derive(Debug, PartialEq)]
@@ -80,20 +91,32 @@ fn run(mut args: Args) -> Result<()> {
         num_bytes: 0,
         num_chars: 0,
     };
-    for filename in &args.files {
-        match open(filename) {
-            Err(err) => eprintln!("{filename}: {err}"),
-            Ok(file) => {
-                if let Ok(info) = count(file) {
-                    let display_filename = if filename == "-" { "stdin" } else { filename };
-                    display(&display_filename, &info, &args);
-                    total += info;
+
+    if args.files.len() == 1 && args.files[0] == "-" {
+        let mut content = Vec::<u8>::new();
+        std::io::stdin().read_to_end(&mut content)?;
+        let content = String::from_utf8(content)?;
+        let info = count_in_str(&content);
+        display("stdin (keyboard input)", &info, &args);
+        total += info;
+    } else {
+        for filename in &args.files {
+            match open(filename) {
+                Err(err) => eprintln!("{filename}: {err}"),
+                Ok(file) => {
+                    if let Ok(info) = count_file(file) {
+                        let display_filename = if filename == "-" { "stdin" } else { filename };
+                        display(&display_filename, &info, &args);
+                        total += info;
+                    }
                 }
             }
         }
     }
 
-    display("Total", &total, &args);
+    if args.total == TotalWhen::Always {
+        display("Total", &total, &args);
+    }
     Ok(())
 }
 
@@ -106,7 +129,7 @@ fn open(filename: &str) -> Result<Box<dyn BufRead>> {
 }
 
 // --------------------------------------------------
-fn count(mut file: impl BufRead) -> Result<FileInfo> {
+fn count_file(mut file: impl BufRead) -> Result<FileInfo> {
     let mut num_lines = 0;
     let mut num_words = 0;
     let mut num_bytes = 0;
@@ -133,4 +156,27 @@ fn count(mut file: impl BufRead) -> Result<FileInfo> {
         num_bytes,
         num_chars,
     })
+}
+
+fn count_in_str(text: &str) -> FileInfo {
+    let mut num_lines = 0;
+    let mut num_words = 0;
+    let mut num_bytes = 0;
+    let mut num_chars = 0;
+    for line in text.split("\n") {
+        num_bytes += line.bytes().len() + 1; // +1 for the extra byte for \n
+        num_lines += 1;
+        num_chars += line.chars().count() + 1; // +1 for the extra char for \n
+        for l in line.split(" ") {
+            if l.trim() != "" {
+                num_words += 1;
+            }
+        }
+    }
+    FileInfo {
+        num_lines,
+        num_words,
+        num_bytes,
+        num_chars,
+    }
 }
