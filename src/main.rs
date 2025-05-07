@@ -11,10 +11,10 @@ struct Args {
     #[arg(value_name = "FILE", default_value = "-")]
     files: Vec<String>,
     /// Show line count
-    #[arg(short, long)]
+    #[arg(short('l'), long)]
     lines: bool,
     /// Show word count
-    #[arg(short, long)]
+    #[arg(short('w'), long)]
     words: bool,
     /// Show byte count
     #[arg(short('c'), long)]
@@ -29,6 +29,7 @@ struct FileInfo {
     num_lines: usize,
     num_words: usize,
     num_bytes: usize,
+    num_chars: usize,
 }
 
 impl std::ops::AddAssign for FileInfo {
@@ -36,6 +37,7 @@ impl std::ops::AddAssign for FileInfo {
         self.num_bytes += rhs.num_bytes;
         self.num_words += rhs.num_words;
         self.num_lines += rhs.num_lines;
+        self.num_chars += rhs.num_chars;
     }
 }
 
@@ -47,41 +49,51 @@ fn main() {
     }
 }
 
+fn display(lhs: &str, info: &FileInfo, args: &Args) {
+    let mut res = String::new();
+    if args.lines {
+        res += &format!(" {} lines", info.num_lines);
+    }
+    if args.words {
+        res += &format!(" {} words", info.num_words);
+    }
+    if args.chars {
+        res += &format!(" {} chars", info.num_chars);
+    }
+    if args.bytes {
+        res += &format!(" {} bytes", info.num_bytes);
+    }
+    println!("{lhs} ={res}");
+}
+
 // --------------------------------------------------
 fn run(mut args: Args) -> Result<()> {
-    args.lines = true;
-    args.words = true;
-    args.bytes = true;
+    if !args.words && !args.lines && !args.chars && !args.bytes {
+        args.words = true;
+        args.lines = true;
+        args.chars = true;
+        args.bytes = true;
+    }
     let mut total = FileInfo {
         num_lines: 0,
         num_words: 0,
         num_bytes: 0,
+        num_chars: 0,
     };
     for filename in &args.files {
         match open(filename) {
             Err(err) => eprintln!("{filename}: {err}"),
             Ok(file) => {
                 if let Ok(info) = count(file) {
-                    println!(
-                        "{} = {} lines {} words {} bytes",
-                        match filename {
-                            "-" => "stdin",
-                            default => default,
-                        },
-                        info.num_lines,
-                        info.num_words,
-                        info.num_bytes,
-                    );
+                    let display_filename = if filename == "-" { "stdin" } else { filename };
+                    display(&display_filename, &info, &args);
                     total += info;
                 }
             }
         }
     }
 
-    println!(
-        "Total: {} lines {} words {} bytes",
-        total.num_lines, total.num_words, total.num_bytes
-    );
+    display("Total", &total, &args);
     Ok(())
 }
 
@@ -98,6 +110,7 @@ fn count(mut file: impl BufRead) -> Result<FileInfo> {
     let mut num_lines = 0;
     let mut num_words = 0;
     let mut num_bytes = 0;
+    let mut num_chars = 0;
     let mut line = String::new();
     loop {
         let line_bytes = file.read_line(&mut line)?;
@@ -106,6 +119,7 @@ fn count(mut file: impl BufRead) -> Result<FileInfo> {
         }
         num_bytes += line_bytes;
         num_lines += 1;
+        num_chars += line.chars().count();
         for l in line.split(" ") {
             if l.trim() != "" {
                 num_words += 1;
@@ -117,5 +131,6 @@ fn count(mut file: impl BufRead) -> Result<FileInfo> {
         num_lines,
         num_words,
         num_bytes,
+        num_chars,
     })
 }
